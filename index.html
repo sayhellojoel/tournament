@@ -1,0 +1,32 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spikeball Tournament Standings</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Spikeball Tournament</h1>
+        
+        <section>
+            <h2>Current Matches</h2>
+            <div id="current-matches" class="matches-grid">
+                <p>Loading matches...</p>
+            </div>
+        </section>
+
+        <section>
+            <h2>Overall Standings</h2>
+            <div id="standings-table">
+                <p>Loading standings...</p>
+            </div>
+        </section>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="main.js"></script>
+</body>
+</html>
