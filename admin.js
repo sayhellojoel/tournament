@@ -3,8 +3,7 @@
 // ❗️❗️❗️ REPLACE WITH YOUR SUPABASE CREDENTIALS ❗️❗️❗️
 const supabaseUrl = 'https://ussbvpdmhlllzimnxdaj.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzc2J2cGRtaGxsbHppbW54ZGFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2OTMxMTUsImV4cCI6MjA3MjI2OTExNX0.0bEpqQ9gPqHL37CTgXkb2vo3yibGGDs-_WkhUNORLHo';
-const supabase = supabase.createClient(supabaseUrl, supabaseKey);
-
+const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
 // ---- DOM ELEMENTS ----
 const addPlayerForm = document.getElementById('add-player-form');
