@@ -6,6 +6,7 @@
     --text-color: #212529;
     --success-color: #28a745;
     --danger-color: #dc3545;
+    --warning-color: #ffc107;
 }
 
 body {
@@ -59,6 +60,8 @@ th {
     border-radius: 5px;
     padding: 15px;
     background: #fff;
+    display: flex;
+    flex-direction: column;
 }
 
 .match-card h3 {
@@ -79,6 +82,19 @@ th {
     font-weight: bold;
 }
 
+.winner-declared {
+    text-align: center;
+    padding: 10px;
+    background-color: #e2e3e5;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+
+.winner-declared strong {
+    color: var(--success-color);
+}
+
+
 /* --- Admin Panel Specific Styles --- */
 .admin-section {
     margin-bottom: 30px;
@@ -92,12 +108,20 @@ th {
     border-radius: 5px;
 }
 
+/* CHANGE: Added flex display to align checkbox and label */
+.player-checklist div {
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Adds space between checkbox and name */
+    padding: 4px 0;
+}
+
 label {
     display: block;
     margin-bottom: 5px;
 }
 
-input[type="text"], input[type="number"] {
+input[type="text"] {
     padding: 8px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
@@ -125,6 +149,16 @@ button.win-btn {
 }
 button.win-btn:hover {
     background-color: #218838;
+}
+
+/* NEW: Style for the undo button */
+button.undo-btn {
+    background-color: var(--warning-color);
+    color: #212529;
+    margin-top: 10px;
+}
+button.undo-btn:hover {
+    background-color: #e0a800;
 }
 
 .status-message {

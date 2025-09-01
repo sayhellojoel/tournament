@@ -2,7 +2,6 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
-// Helper function for random shuffling (Fisher-Yates algorithm)
 const shuffleArray = (array) => {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -24,83 +23,84 @@ exports.handler = async function (event, context) {
   }
 
   try {
-    // 1. Fetch all existing partnerships
     const { data: existingPartnerships, error: partnershipError } = await supabase
       .from('partnerships')
       .select('player1_id, player2_id');
-
     if (partnershipError) throw partnershipError;
 
-    // Create a Set for quick lookups. Store pairs sorted to avoid duplicates (e.g., '1-2' is same as '2-1')
     const partnershipSet = new Set(
       existingPartnerships.map(p => [p.player1_id, p.player2_id].sort((a, b) => a - b).join('-'))
     );
 
-    // 2. Randomize players and try to form new pairs
-    const shuffledPlayers = shuffleArray([...activePlayerIds]);
-    const pairs = [];
-    const usedPlayerIds = new Set();
+    // --- MAJOR CHANGE: Retry logic for pairing generation ---
+    let bestPairs = [];
+    const MAX_ATTEMPTS = 20; // Try up to 20 different shuffles to find a solution
 
-    for (const playerA of shuffledPlayers) {
-      if (usedPlayerIds.has(playerA)) continue;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const shuffledPlayers = shuffleArray([...activePlayerIds]);
+      const currentPairs = [];
+      const usedPlayerIds = new Set();
 
-      let foundPartner = false;
-      for (const playerB of shuffledPlayers) {
-        if (playerA === playerB || usedPlayerIds.has(playerB)) continue;
+      for (const playerA of shuffledPlayers) {
+        if (usedPlayerIds.has(playerA)) continue;
 
-        const partnershipKey = [playerA, playerB].sort((a, b) => a - b).join('-');
-        if (!partnershipSet.has(partnershipKey)) {
-          pairs.push({ p1: playerA, p2: playerB });
-          usedPlayerIds.add(playerA);
-          usedPlayerIds.add(playerB);
-          foundPartner = true;
-          break; 
+        for (const playerB of shuffledPlayers) {
+          if (playerA === playerB || usedPlayerIds.has(playerB)) continue;
+
+          const partnershipKey = [playerA, playerB].sort((a, b) => a - b).join('-');
+          if (!partnershipSet.has(partnershipKey)) {
+            currentPairs.push({ p1: playerA, p2: playerB });
+            usedPlayerIds.add(playerA);
+            usedPlayerIds.add(playerB);
+            break; 
+          }
         }
       }
+      
+      // If this attempt is better than previous ones, save it
+      if (currentPairs.length > bestPairs.length) {
+        bestPairs = [...currentPairs];
+      }
+      
+      // If we've successfully paired almost everyone, this is a good solution
+      if (bestPairs.length * 2 >= activePlayerIds.length - 1) {
+        break;
+      }
+    }
+    // --- END OF MAJOR CHANGE ---
+
+    if (bestPairs.length < 2) { // Need at least two pairs to make a game
+      return { statusCode: 400, body: JSON.stringify({ error: 'Failed to generate enough new pairs. Try adding more players or check existing partnerships.' }) };
     }
     
-    // 3. Group pairs into matches
     const matchesToInsert = [];
-    for (let i = 0; i < pairs.length; i += 2) {
-      if (pairs[i+1]) { // Make sure there's a second pair to form a match
+    for (let i = 0; i < bestPairs.length; i += 2) {
+      if (bestPairs[i+1]) {
          matchesToInsert.push({
             round_number: roundNumber,
-            team1_player1_id: pairs[i].p1,
-            team1_player2_id: pairs[i].p2,
-            team2_player1_id: pairs[i+1].p1,
-            team2_player2_id: pairs[i+1].p2,
+            team1_player1_id: bestPairs[i].p1,
+            team1_player2_id: bestPairs[i].p2,
+            team2_player1_id: bestPairs[i+1].p1,
+            team2_player2_id: bestPairs[i+1].p2,
             is_playoff_game: false,
          });
       }
     }
-
+    
     if (matchesToInsert.length === 0) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Could not generate any new valid matches. All possible pairings may have been used.' }) };
+      return { statusCode: 400, body: JSON.stringify({ error: 'Could not form any 2v2 matches from the generated pairs.' }) };
     }
-
-    // 4. Insert new games into the 'games' table
-    const { data: newGames, error: gamesError } = await supabase
-      .from('games')
-      .insert(matchesToInsert)
-      .select();
-
+    
+    const { error: gamesError } = await supabase.from('games').insert(matchesToInsert);
     if (gamesError) throw gamesError;
 
-    // 5. Update the 'partnerships' table with the new pairs
-    const newPartnershipsToInsert = pairs.map(p => ({
-        player1_id: p.p1,
-        player2_id: p.p2
-    }));
-
-    const { error: newPartnershipsError } = await supabase
-        .from('partnerships')
-        .insert(newPartnershipsToInsert);
-
+    const newPartnershipsToInsert = bestPairs.map(p => ({ player1_id: p.p1, player2_id: p.p2 }));
+    const { error: newPartnershipsError } = await supabase.from('partnerships').insert(newPartnershipsToInsert);
     if (newPartnershipsError) throw newPartnershipsError;
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: `${newGames.length} matches created successfully.` }),
+      body: JSON.stringify({ message: `${matchesToInsert.length} matches created successfully.` }),
     };
 
   } catch (error) {

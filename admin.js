@@ -5,18 +5,20 @@ const supabaseUrl = 'https://ussbvpdmhlllzimnxdaj.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzc2J2cGRtaGxsbHppbW54ZGFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2OTMxMTUsImV4cCI6MjA3MjI2OTExNX0.0bEpqQ9gPqHL37CTgXkb2vo3yibGGDs-_WkhUNORLHo';
 const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
 
+// ---- STATE ----
+let currentRound = 1;
+
 // ---- DOM ELEMENTS ----
 const addPlayerForm = document.getElementById('add-player-form');
 const playerNameInput = document.getElementById('player-name');
 const playerChecklist = document.getElementById('player-checklist');
-const roundNumberInput = document.getElementById('round-number');
+const currentRoundDisplay = document.getElementById('current-round-display'); // NEW
 const generatePairsBtn = document.getElementById('generate-pairs-btn');
 const unplayedMatchesContainer = document.getElementById('unplayed-matches');
+const finalizeRoundBtn = document.getElementById('finalize-round-btn'); // NEW
 const statusMessage = document.getElementById('status-message');
 
-
 // ---- HELPER FUNCTIONS ----
-
 function showStatus(message, isError = false) {
     statusMessage.textContent = message;
     statusMessage.className = `status-message ${isError ? 'error' : 'success'}`;
@@ -24,15 +26,27 @@ function showStatus(message, isError = false) {
     setTimeout(() => { statusMessage.style.display = 'none'; }, 5000);
 }
 
-
 // ---- DATA FETCHING AND RENDERING ----
+
+async function fetchTournamentState() {
+    const { data, error } = await supabase
+        .from('tournament_state')
+        .select('current_round')
+        .eq('id', 1)
+        .single();
+    
+    if (error || !data) {
+        console.error('Error fetching tournament state:', error);
+        showStatus('Could not fetch tournament state. Please ensure a row exists in the tournament_state table.', true);
+    } else {
+        currentRound = data.current_round;
+        currentRoundDisplay.textContent = currentRound;
+    }
+}
 
 async function fetchAndDisplayPlayers() {
     const { data: players, error } = await supabase.from('players').select('id, name').order('name');
-    if (error) {
-        console.error('Error fetching players:', error);
-        return;
-    }
+    if (error) { console.error('Error fetching players:', error); return; }
     
     playerChecklist.innerHTML = '';
     players.forEach(player => {
@@ -43,26 +57,24 @@ async function fetchAndDisplayPlayers() {
     });
 }
 
+// CHANGE: This function now renders differently based on whether a winner has been chosen
 async function fetchAndDisplayUnplayedGames() {
     const { data: matches, error } = await supabase
         .from('games')
         .select(`
-            id, round_number,
+            id, round_number, winning_team,
             team1_player1:players!games_team1_player1_id_fkey(name),
             team1_player2:players!games_team1_player2_id_fkey(name),
             team2_player1:players!games_team2_player1_id_fkey(name),
             team2_player2:players!games_team2_player2_id_fkey(name)
         `)
-        .is('winning_team', null)
+        .eq('round_number', currentRound) // Only show games for the current round
         .order('id');
 
-    if (error) {
-        console.error('Error fetching unplayed matches:', error);
-        return;
-    }
+    if (error) { console.error('Error fetching matches:', error); return; }
 
     if (matches.length === 0) {
-        unplayedMatchesContainer.innerHTML = '<p>No unplayed matches.</p>';
+        unplayedMatchesContainer.innerHTML = '<p>No matches generated for this round yet.</p>';
         return;
     }
 
@@ -70,88 +82,129 @@ async function fetchAndDisplayUnplayedGames() {
     matches.forEach(match => {
         const card = document.createElement('div');
         card.className = 'match-card';
-        card.innerHTML = `
-            <h3>Round ${match.round_number} (Game ID: ${match.id})</h3>
-            <div class="team">${match.team1_player1.name} & ${match.team1_player2.name}</div>
-            <button class="win-btn" data-game-id="${match.id}" data-winning-team="1">Declare Winner</button>
-            <div class="vs">VS</div>
-            <div class="team">${match.team2_player1.name} & ${match.team2_player2.name}</div>
-            <button class="win-btn" data-game-id="${match.id}" data-winning-team="2">Declare Winner</button>
-        `;
+        
+        let content = `<h3>Round ${match.round_number} (Game ID: ${match.id})</h3>`;
+        const team1Name = `${match.team1_player1.name} & ${match.team1_player2.name}`;
+        const team2Name = `${match.team2_player1.name} & ${match.team2_player2.name}`;
+        
+        if (!match.winning_team) {
+            content += `
+                <div class="team">${team1Name}</div>
+                <button class="win-btn" data-game-id="${match.id}" data-winning-team="1">Declare Winner</button>
+                <div class="vs">VS</div>
+                <div class="team">${team2Name}</div>
+                <button class="win-btn" data-game-id="${match.id}" data-winning-team="2">Declare Winner</button>
+            `;
+        } else {
+            const winnerName = match.winning_team === 1 ? team1Name : team2Name;
+            content += `
+                <div class="team">${team1Name}</div>
+                <div class="vs">VS</div>
+                <div class="team">${team2Name}</div>
+                <div class="winner-declared">Winner: <strong>${winnerName}</strong></div>
+                <button class="undo-btn" data-game-id="${match.id}">Undo Winner</button>
+            `;
+        }
+        card.innerHTML = content;
         unplayedMatchesContainer.appendChild(card);
     });
 }
 
 // ---- EVENT LISTENERS ----
-
-// Add a new player
 addPlayerForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const newName = playerNameInput.value.trim();
     if (!newName) return;
-    
     const { error } = await supabase.from('players').insert({ name: newName });
-    if (error) {
-        showStatus(`Error adding player: ${error.message}`, true);
-    } else {
+    if (error) { showStatus(`Error adding player: ${error.message}`, true); } 
+    else {
         showStatus(`Player "${newName}" added successfully.`);
         playerNameInput.value = '';
         fetchAndDisplayPlayers();
     }
 });
 
-// Generate new pairings
 generatePairsBtn.addEventListener('click', async () => {
     const checkedBoxes = playerChecklist.querySelectorAll('input[type="checkbox"]:checked');
     const activePlayerIds = Array.from(checkedBoxes).map(box => parseInt(box.value));
-    const roundNumber = roundNumberInput.value;
     
     showStatus('Generating pairs...');
     try {
         const response = await fetch('/.netlify/functions/generate-pairings', {
             method: 'POST',
-            body: JSON.stringify({ activePlayerIds, roundNumber })
+            body: JSON.stringify({ activePlayerIds, roundNumber: currentRound })
         });
         const result = await response.json();
-        if (!response.ok) {
-            throw new Error(result.error || 'Failed to generate pairs.');
-        }
+        if (!response.ok) throw new Error(result.error || 'Failed to generate pairs.');
         showStatus(result.message);
-        roundNumberInput.value = parseInt(roundNumber) + 1; // Auto-increment round number
         fetchAndDisplayUnplayedGames();
     } catch (err) {
         showStatus(err.message, true);
     }
 });
 
-// Report a winner (uses event delegation)
+// CHANGE: Listener now handles win-btn and undo-btn clicks
 unplayedMatchesContainer.addEventListener('click', async (e) => {
-    if (e.target.classList.contains('win-btn')) {
-        const gameId = e.target.dataset.gameId;
-        const winningTeam = parseInt(e.target.dataset.winningTeam);
+    const target = e.target;
+    const gameId = target.dataset.gameId;
 
-        e.target.disabled = true;
-        e.target.textContent = 'Reporting...';
-        
-        try {
-            const response = await fetch('/.netlify/functions/report-winner', {
-                method: 'POST',
-                body: JSON.stringify({ gameId, winningTeam })
-            });
-            const result = await response.json();
-            if (!response.ok) throw new Error(result.error);
-            showStatus('Winner reported successfully!');
-            fetchAndDisplayUnplayedGames(); // Refresh the list
-        } catch (err) {
-            showStatus(err.message, true);
-            e.target.disabled = false;
-        }
+    if (!gameId) return; // Didn't click a relevant button
+
+    let winningTeam = null;
+    if (target.classList.contains('win-btn')) {
+        winningTeam = parseInt(target.dataset.winningTeam);
+    } else if (target.classList.contains('undo-btn')) {
+        winningTeam = null;
+    } else {
+        return;
+    }
+    
+    target.disabled = true;
+    target.textContent = 'Updating...';
+
+    try {
+        const response = await fetch('/.netlify/functions/report-winner', {
+            method: 'POST',
+            body: JSON.stringify({ gameId, winningTeam })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        showStatus(result.message);
+        fetchAndDisplayUnplayedGames(); // Refresh the list of matches
+    } catch (err) {
+        showStatus(err.message, true);
+    }
+});
+
+// NEW: Listener for the finalize round button
+finalizeRoundBtn.addEventListener('click', async () => {
+    if (!confirm(`Are you sure you want to finalize Round ${currentRound}? This will update all stats and advance the tournament to the next round.`)) {
+        return;
+    }
+
+    showStatus(`Finalizing Round ${currentRound}...`);
+    try {
+        const response = await fetch('/.netlify/functions/finalize-round', {
+            method: 'POST',
+            body: JSON.stringify({ roundNumber: currentRound })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        showStatus(result.message, false);
+        // Success, now refresh the entire admin panel state
+        await fetchTournamentState();
+        await fetchAndDisplayUnplayedGames();
+    } catch (err) {
+        showStatus(err.message, true);
     }
 });
 
 
 // ---- INITIAL LOAD ----
-document.addEventListener('DOMContentLoaded', () => {
-    fetchAndDisplayPlayers();
-    fetchAndDisplayUnplayedGames();
-});
+async function initializeAdminPanel() {
+    await fetchTournamentState();
+    await fetchAndDisplayPlayers();
+    await fetchAndDisplayUnplayedGames();
+}
+
+document.addEventListener('DOMContentLoaded', initializeAdminPanel);
