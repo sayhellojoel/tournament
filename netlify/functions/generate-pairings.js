@@ -23,34 +23,57 @@ exports.handler = async function (event, context) {
   }
 
   try {
-    // Clear any previous byes for this round to prevent duplicates on a re-run
     await supabase.from('byes').delete().eq('round_number', roundNumber);
 
-    const { data: existingPartnerships, error: partnershipError } = await supabase
-      .from('partnerships')
-      .select('player1_id, player2_id');
+    // --- NEW: Fetch all historical byes to ensure fairness ---
+    const { data: allByes, error: byesError } = await supabase.from('byes').select('player_id');
+    if (byesError) throw byesError;
+
+    // Create a map to count byes for each player
+    const byeCounts = new Map();
+    for (const bye of allByes) {
+        byeCounts.set(bye.player_id, (byeCounts.get(bye.player_id) || 0) + 1);
+    }
+    // --- END NEW ---
+
+    const { data: existingPartnerships, error: partnershipError } = await supabase.from('partnerships').select('player1_id, player2_id');
     if (partnershipError) throw partnershipError;
 
     const partnershipSet = new Set(
       existingPartnerships.map(p => [p.player1_id, p.player2_id].sort((a, b) => a - b).join('-'))
     );
 
+    // --- CHANGE: Prioritize players with the most byes ---
+    // 1. Create objects with player IDs and their bye counts
+    let playersToPair = activePlayerIds.map(id => ({
+        id: id,
+        byeCount: byeCounts.get(id) || 0
+    }));
+
+    // 2. Sort players: those with MORE byes come FIRST. This means we try to pair them first.
+    playersToPair.sort((a, b) => b.byeCount - a.byeCount);
+    
+    // 3. Get just the sorted IDs to use in the pairing logic
+    const sortedPlayerIds = playersToPair.map(p => p.id);
+    // --- END CHANGE ---
+
     let bestPairs = [];
     const MAX_ATTEMPTS = 20;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      const shuffledPlayers = shuffleArray([...activePlayerIds]);
+      // Shuffle the sorted list slightly to get variation in partners, while keeping general priority
+      const playersForThisAttempt = shuffleArray([...sortedPlayerIds]);
       const currentPairs = [];
       const usedPlayerIds = new Set();
-      for (const playerA of shuffledPlayers) {
-        if (usedPlayerIds.has(playerA)) continue;
-        for (const playerB of shuffledPlayers) {
-          if (playerA === playerB || usedPlayerIds.has(playerB)) continue;
-          const partnershipKey = [playerA, playerB].sort((a, b) => a - b).join('-');
+      for (const playerA_id of playersForThisAttempt) {
+        if (usedPlayerIds.has(playerA_id)) continue;
+        for (const playerB_id of playersForThisAttempt) {
+          if (playerA_id === playerB_id || usedPlayerIds.has(playerB_id)) continue;
+          const partnershipKey = [playerA_id, playerB_id].sort((a, b) => a - b).join('-');
           if (!partnershipSet.has(partnershipKey)) {
-            currentPairs.push({ p1: playerA, p2: playerB });
-            usedPlayerIds.add(playerA);
-            usedPlayerIds.add(playerB);
+            currentPairs.push({ p1: playerA_id, p2: playerB_id });
+            usedPlayerIds.add(playerA_id);
+            usedPlayerIds.add(playerB_id);
             break; 
           }
         }
@@ -85,7 +108,6 @@ exports.handler = async function (event, context) {
     const newPartnershipsToInsert = bestPairs.map(p => ({ player1_id: p.p1, player2_id: p.p2 }));
     await supabase.from('partnerships').insert(newPartnershipsToInsert);
 
-    // --- NEW: Identify and save bye players ---
     const playersInGames = new Set(matchesToInsert.flatMap(m => [m.team1_player1_id, m.team1_player2_id, m.team2_player1_id, m.team2_player2_id]));
     const byePlayerIds = activePlayerIds.filter(id => !playersInGames.has(id));
     
@@ -93,17 +115,15 @@ exports.handler = async function (event, context) {
     if (byePlayerIds.length > 0) {
         const byesToInsert = byePlayerIds.map(id => ({ round_number: roundNumber, player_id: id }));
         await supabase.from('byes').insert(byesToInsert);
-
         const { data: byePlayers } = await supabase.from('players').select('name').in('id', byePlayerIds);
         if (byePlayers) byePlayerNames = byePlayers.map(p => p.name);
     }
-    // --- END NEW ---
 
     return {
       statusCode: 200,
       body: JSON.stringify({ 
           message: `${matchesToInsert.length} matches created successfully.`,
-          byePlayerNames: byePlayerNames // Send names back to admin UI
+          byePlayerNames: byePlayerNames
       }),
     };
   } catch (error) {
