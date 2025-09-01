@@ -1,16 +1,9 @@
 # netlify.toml
+
+# This tells Netlify where your serverless functions are located.
 [build]
   functions = "netlify/functions"
 
+# This specifies the bundler to use for your functions.
 [functions]
   node_bundler = "esbuild"
-
-# These variables are used during the build process and by your functions.
-# For a real project, set these in the Netlify UI for better security.
-[context.production.environment]
-  SUPABASE_URL = "https://ussbvpdmhlllzimnxdaj.supabase.co"
-  SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzc2J2cGRtaGxsbHppbW54ZGFqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NjY5MzExNSwiZXhwIjoyMDcyMjY5MTE1fQ.PRVzWBsat96ft3gxY7aaFMuY9Foz_SFg6RAsai2Go2E" # Use the SECRET service_role key here
-
-[context.dev.environment]
-  SUPABASE_URL = "https://ussbvpdmhlllzimnxdaj.supabase.co"
-  SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVzc2J2cGRtaGxsbHppbW54ZGFqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NjY5MzExNSwiZXhwIjoyMDcyMjY5MTE1fQ.PRVzWBsat96ft3gxY7aaFMuY9Foz_SFg6RAsai2Go2E" # Use the SECRET service_role key here
