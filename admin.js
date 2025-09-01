@@ -109,7 +109,7 @@ async function fetchAndDisplayUnplayedGames() {
                 <div class="vs">VS</div>
                 <div class="team">${team2Name}</div>
                 <div class="winner-declared">Winner: <strong>${winnerName}</strong></div>
-                <button class="undo-btn" data-game-id="${match.id}">Undo Winner</button>
+                <button class="undo-btn" data-game-id="${match.id}">Undo / Change Winner</button>
             `;
         }
         card.innerHTML = content;
@@ -135,6 +135,8 @@ generatePairsBtn.addEventListener('click', async () => {
     const checkedBoxes = playerChecklist.querySelectorAll('input[type="checkbox"]:checked');
     const activePlayerIds = Array.from(checkedBoxes).map(box => parseInt(box.value));
     
+    generatePairsBtn.disabled = true;
+    generatePairsBtn.textContent = 'Generating...';
     showStatus('Generating pairs...');
     try {
         const response = await fetch('/.netlify/functions/generate-pairings', {
@@ -147,19 +149,25 @@ generatePairsBtn.addEventListener('click', async () => {
         fetchAndDisplayUnplayedGames();
     } catch (err) {
         showStatus(err.message, true);
+    } finally {
+        generatePairsBtn.disabled = false;
+        generatePairsBtn.textContent = 'Generate Pairings';
     }
 });
 
+// MAJOR FIX: Added robust try/catch/finally to prevent buttons from getting stuck
 unplayedMatchesContainer.addEventListener('click', async (e) => {
     const target = e.target;
     const gameId = target.dataset.gameId;
     if (!gameId) return;
 
     let winningTeam = null;
+    let originalText = target.textContent;
+    
     if (target.classList.contains('win-btn')) {
         winningTeam = parseInt(target.dataset.winningTeam);
     } else if (target.classList.contains('undo-btn')) {
-        winningTeam = null;
+        winningTeam = null; // Setting winner to null is the "undo" action
     } else {
         return;
     }
@@ -174,17 +182,26 @@ unplayedMatchesContainer.addEventListener('click', async (e) => {
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error);
+        
         showStatus(result.message);
-        fetchAndDisplayUnplayedGames();
+        // CRITICAL: On success, re-fetch the games to show the updated state (either with a winner or back to the initial state)
+        await fetchAndDisplayUnplayedGames();
     } catch (err) {
         showStatus(err.message, true);
+        // If an error occurs, re-enable the button so the user can try again
+        target.disabled = false;
+        target.textContent = originalText;
     }
+    // Note: No 'finally' block needed here because on success, the button is removed/redrawn by fetchAndDisplayUnplayedGames.
 });
 
 finalizeRoundBtn.addEventListener('click', async () => {
     if (!confirm(`Are you sure you want to finalize Round ${currentRound}? This will update all stats and advance the tournament to the next round.`)) {
         return;
     }
+    
+    finalizeRoundBtn.disabled = true;
+    finalizeRoundBtn.textContent = 'Finalizing...';
     showStatus(`Finalizing Round ${currentRound}...`);
     try {
         const response = await fetch('/.netlify/functions/finalize-round', {
@@ -197,6 +214,9 @@ finalizeRoundBtn.addEventListener('click', async () => {
         await initializeAdminPanel();
     } catch (err) {
         showStatus(err.message, true);
+    } finally {
+        finalizeRoundBtn.disabled = false;
+        finalizeRoundBtn.textContent = 'Finalize Round & Advance';
     }
 });
 
