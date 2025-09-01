@@ -1,55 +1,32 @@
-<!-- admin.html -->
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tournament Admin Panel</title>
+    <title>Spikeball Tournament Standings</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
-        <h1>Admin Panel</h1>
+        <h1>Spikeball Tournament</h1>
+        
+        <section>
+            <h2>Current Matches</h2>
+            <div id="current-matches" class="matches-grid">
+                <p>Loading matches...</p>
+            </div>
+        </section>
 
-        <!-- Section for Managing Players -->
-        <section class="admin-section">
-            <h2>Manage Players</h2>
-            <form id="add-player-form">
-                <label for="player-name">New Player Name:</label>
-                <input type="text" id="player-name" required>
-                <button type="submit">Add Player</button>
-            </form>
-        </section>
-        
-        <!-- Section for Generating Rounds -->
-        <section class="admin-section">
-            <!-- CHANGE: Round number is now displayed, not an input -->
-            <h2>Generate Pairings for Round <span id="current-round-display">1</span></h2>
-            <div>
-                <label>Select players for this round:</label>
-                <div id="player-checklist" class="player-checklist">
-                    <p>Loading players...</p>
-                </div>
+        <section>
+            <h2>Overall Standings</h2>
+            <div id="standings-table">
+                <p>Loading standings...</p>
             </div>
-            <br>
-            <button id="generate-pairs-btn">Generate Pairings</button>
         </section>
-        
-        <!-- Section for Reporting Winners -->
-        <section class="admin-section">
-            <h2>Report Game Winners</h2>
-            <div id="unplayed-matches" class="matches-grid">
-                <p>No unplayed matches found.</p>
-            </div>
-            <!-- NEW: Button to finalize the round and update scores -->
-            <br>
-            <button id="finalize-round-btn" style="background-color: var(--success-color);">Finalize Round & Advance</button>
-        </section>
-        
-        <div id="status-message" class="status-message"></div>
     </div>
-    
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="admin.js"></script>
+    <script src="main.js"></script>
 </body>
 </html>
