@@ -1,4 +1,3 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,9 +11,13 @@
         <h1>Spikeball Tournament</h1>
         
         <section>
-            <h2>Current Matches</h2>
+            <h2>Current Round Matches</h2>
             <div id="current-matches" class="matches-grid">
                 <p>Loading matches...</p>
+            </div>
+            <!-- NEW: Section to display byes -->
+            <div id="bye-players-container">
+                <!-- Bye players will be rendered here by JS -->
             </div>
         </section>
 
@@ -22,6 +25,15 @@
             <h2>Overall Standings</h2>
             <div id="standings-table">
                 <p>Loading standings...</p>
+            </div>
+        </section>
+
+        <!-- NEW: Hidden section for playoff outlook -->
+        <section id="playoff-outlook" style="display: none;">
+            <h2>Playoff Outlook</h2>
+            <p>Based on current standings, if the playoffs started now:</p>
+            <div id="playoff-matches" class="matches-grid">
+                <!-- Playoff preview matches will be rendered here by JS -->
             </div>
         </section>
     </div>

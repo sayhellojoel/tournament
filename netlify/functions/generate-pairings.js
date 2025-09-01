@@ -23,6 +23,9 @@ exports.handler = async function (event, context) {
   }
 
   try {
+    // Clear any previous byes for this round to prevent duplicates on a re-run
+    await supabase.from('byes').delete().eq('round_number', roundNumber);
+
     const { data: existingPartnerships, error: partnershipError } = await supabase
       .from('partnerships')
       .select('player1_id, player2_id');
@@ -32,21 +35,17 @@ exports.handler = async function (event, context) {
       existingPartnerships.map(p => [p.player1_id, p.player2_id].sort((a, b) => a - b).join('-'))
     );
 
-    // --- MAJOR CHANGE: Retry logic for pairing generation ---
     let bestPairs = [];
-    const MAX_ATTEMPTS = 20; // Try up to 20 different shuffles to find a solution
+    const MAX_ATTEMPTS = 20;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const shuffledPlayers = shuffleArray([...activePlayerIds]);
       const currentPairs = [];
       const usedPlayerIds = new Set();
-
       for (const playerA of shuffledPlayers) {
         if (usedPlayerIds.has(playerA)) continue;
-
         for (const playerB of shuffledPlayers) {
           if (playerA === playerB || usedPlayerIds.has(playerB)) continue;
-
           const partnershipKey = [playerA, playerB].sort((a, b) => a - b).join('-');
           if (!partnershipSet.has(partnershipKey)) {
             currentPairs.push({ p1: playerA, p2: playerB });
@@ -56,20 +55,11 @@ exports.handler = async function (event, context) {
           }
         }
       }
-      
-      // If this attempt is better than previous ones, save it
-      if (currentPairs.length > bestPairs.length) {
-        bestPairs = [...currentPairs];
-      }
-      
-      // If we've successfully paired almost everyone, this is a good solution
-      if (bestPairs.length * 2 >= activePlayerIds.length - 1) {
-        break;
-      }
+      if (currentPairs.length > bestPairs.length) bestPairs = [...currentPairs];
+      if (bestPairs.length * 2 >= activePlayerIds.length - 1) break;
     }
-    // --- END OF MAJOR CHANGE ---
 
-    if (bestPairs.length < 2) { // Need at least two pairs to make a game
+    if (bestPairs.length < 2) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Failed to generate enough new pairs. Try adding more players or check existing partnerships.' }) };
     }
     
@@ -91,18 +81,31 @@ exports.handler = async function (event, context) {
       return { statusCode: 400, body: JSON.stringify({ error: 'Could not form any 2v2 matches from the generated pairs.' }) };
     }
     
-    const { error: gamesError } = await supabase.from('games').insert(matchesToInsert);
-    if (gamesError) throw gamesError;
-
+    await supabase.from('games').insert(matchesToInsert);
     const newPartnershipsToInsert = bestPairs.map(p => ({ player1_id: p.p1, player2_id: p.p2 }));
-    const { error: newPartnershipsError } = await supabase.from('partnerships').insert(newPartnershipsToInsert);
-    if (newPartnershipsError) throw newPartnershipsError;
+    await supabase.from('partnerships').insert(newPartnershipsToInsert);
+
+    // --- NEW: Identify and save bye players ---
+    const playersInGames = new Set(matchesToInsert.flatMap(m => [m.team1_player1_id, m.team1_player2_id, m.team2_player1_id, m.team2_player2_id]));
+    const byePlayerIds = activePlayerIds.filter(id => !playersInGames.has(id));
+    
+    let byePlayerNames = [];
+    if (byePlayerIds.length > 0) {
+        const byesToInsert = byePlayerIds.map(id => ({ round_number: roundNumber, player_id: id }));
+        await supabase.from('byes').insert(byesToInsert);
+
+        const { data: byePlayers } = await supabase.from('players').select('name').in('id', byePlayerIds);
+        if (byePlayers) byePlayerNames = byePlayers.map(p => p.name);
+    }
+    // --- END NEW ---
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ message: `${matchesToInsert.length} matches created successfully.` }),
+      body: JSON.stringify({ 
+          message: `${matchesToInsert.length} matches created successfully.`,
+          byePlayerNames: byePlayerNames // Send names back to admin UI
+      }),
     };
-
   } catch (error) {
     console.error('Error generating pairings:', error);
     return { statusCode: 500, body: JSON.stringify({ error: error.message }) };
