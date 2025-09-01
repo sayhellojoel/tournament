@@ -12,11 +12,15 @@ let currentRound = 1;
 const addPlayerForm = document.getElementById('add-player-form');
 const playerNameInput = document.getElementById('player-name');
 const playerChecklist = document.getElementById('player-checklist');
-const currentRoundDisplay = document.getElementById('current-round-display'); // NEW
+const currentRoundDisplay = document.getElementById('current-round-display');
 const generatePairsBtn = document.getElementById('generate-pairs-btn');
 const unplayedMatchesContainer = document.getElementById('unplayed-matches');
-const finalizeRoundBtn = document.getElementById('finalize-round-btn'); // NEW
+const finalizeRoundBtn = document.getElementById('finalize-round-btn');
 const statusMessage = document.getElementById('status-message');
+const showResetModalBtn = document.getElementById('show-reset-modal-btn');
+const resetModal = document.getElementById('reset-modal');
+const cancelResetBtn = document.getElementById('cancel-reset-btn');
+const confirmResetBtn = document.getElementById('confirm-reset-btn');
 
 // ---- HELPER FUNCTIONS ----
 function showStatus(message, isError = false) {
@@ -27,7 +31,6 @@ function showStatus(message, isError = false) {
 }
 
 // ---- DATA FETCHING AND RENDERING ----
-
 async function fetchTournamentState() {
     const { data, error } = await supabase
         .from('tournament_state')
@@ -49,6 +52,11 @@ async function fetchAndDisplayPlayers() {
     if (error) { console.error('Error fetching players:', error); return; }
     
     playerChecklist.innerHTML = '';
+    if (players.length === 0) {
+        playerChecklist.innerHTML = '<p>No players added yet.</p>';
+        return;
+    }
+
     players.forEach(player => {
         const div = document.createElement('div');
         div.innerHTML = `<input type="checkbox" id="player-${player.id}" value="${player.id}" checked>
@@ -57,7 +65,6 @@ async function fetchAndDisplayPlayers() {
     });
 }
 
-// CHANGE: This function now renders differently based on whether a winner has been chosen
 async function fetchAndDisplayUnplayedGames() {
     const { data: matches, error } = await supabase
         .from('games')
@@ -68,7 +75,7 @@ async function fetchAndDisplayUnplayedGames() {
             team2_player1:players!games_team2_player1_id_fkey(name),
             team2_player2:players!games_team2_player2_id_fkey(name)
         `)
-        .eq('round_number', currentRound) // Only show games for the current round
+        .eq('round_number', currentRound)
         .order('id');
 
     if (error) { console.error('Error fetching matches:', error); return; }
@@ -143,12 +150,10 @@ generatePairsBtn.addEventListener('click', async () => {
     }
 });
 
-// CHANGE: Listener now handles win-btn and undo-btn clicks
 unplayedMatchesContainer.addEventListener('click', async (e) => {
     const target = e.target;
     const gameId = target.dataset.gameId;
-
-    if (!gameId) return; // Didn't click a relevant button
+    if (!gameId) return;
 
     let winningTeam = null;
     if (target.classList.contains('win-btn')) {
@@ -170,18 +175,16 @@ unplayedMatchesContainer.addEventListener('click', async (e) => {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error);
         showStatus(result.message);
-        fetchAndDisplayUnplayedGames(); // Refresh the list of matches
+        fetchAndDisplayUnplayedGames();
     } catch (err) {
         showStatus(err.message, true);
     }
 });
 
-// NEW: Listener for the finalize round button
 finalizeRoundBtn.addEventListener('click', async () => {
     if (!confirm(`Are you sure you want to finalize Round ${currentRound}? This will update all stats and advance the tournament to the next round.`)) {
         return;
     }
-
     showStatus(`Finalizing Round ${currentRound}...`);
     try {
         const response = await fetch('/.netlify/functions/finalize-round', {
@@ -191,14 +194,44 @@ finalizeRoundBtn.addEventListener('click', async () => {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error);
         showStatus(result.message, false);
-        // Success, now refresh the entire admin panel state
-        await fetchTournamentState();
-        await fetchAndDisplayUnplayedGames();
+        await initializeAdminPanel();
     } catch (err) {
         showStatus(err.message, true);
     }
 });
 
+showResetModalBtn.addEventListener('click', () => {
+    resetModal.style.display = 'flex';
+});
+
+cancelResetBtn.addEventListener('click', () => {
+    resetModal.style.display = 'none';
+});
+
+confirmResetBtn.addEventListener('click', async () => {
+    confirmResetBtn.disabled = true;
+    confirmResetBtn.textContent = 'Resetting...';
+    cancelResetBtn.disabled = true;
+
+    try {
+        const response = await fetch('/.netlify/functions/reset-tournament', {
+            method: 'POST'
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || 'An unknown error occurred.');
+        }
+        showStatus(result.message, false);
+        resetModal.style.display = 'none';
+        await initializeAdminPanel();
+    } catch (err) {
+        showStatus(err.message, true);
+    } finally {
+        confirmResetBtn.disabled = false;
+        confirmResetBtn.textContent = 'I confirm I want to wipe the database';
+        cancelResetBtn.disabled = false;
+    }
+});
 
 // ---- INITIAL LOAD ----
 async function initializeAdminPanel() {
