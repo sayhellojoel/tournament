@@ -25,17 +25,45 @@ exports.handler = async function (event, context) {
   try {
     await supabase.from('byes').delete().eq('round_number', roundNumber);
 
-    // --- NEW: Fetch all historical byes to ensure fairness ---
+    // --- NEW ALGORITHM START ---
+
+    // 1. Fetch all historical byes to determine who is "due" to play.
     const { data: allByes, error: byesError } = await supabase.from('byes').select('player_id');
     if (byesError) throw byesError;
 
-    // Create a map to count byes for each player
     const byeCounts = new Map();
     for (const bye of allByes) {
         byeCounts.set(bye.player_id, (byeCounts.get(bye.player_id) || 0) + 1);
     }
-    // --- END NEW ---
 
+    // 2. Intelligently select players for byes based on the lowest count.
+    const numByesNeeded = activePlayerIds.length % 4;
+    let playersForGames = [...activePlayerIds];
+    let byePlayerIds = [];
+
+    if (numByesNeeded > 0) {
+        // Create a list of active players with their bye counts
+        let byeCandidates = activePlayerIds.map(id => ({
+            id: id,
+            byeCount: byeCounts.get(id) || 0
+        }));
+        
+        // Sort candidates so those with the FEWEST byes are first.
+        byeCandidates.sort((a, b) => a.byeCount - b.byeCount);
+        
+        // Assign the first N players from the sorted list to a bye.
+        const playersGettingBye = byeCandidates.slice(0, numByesNeeded);
+        byePlayerIds = playersGettingBye.map(p => p.id);
+        
+        // The remaining players are the ones who will be in games.
+        const byePlayerIdSet = new Set(byePlayerIds);
+        playersForGames = activePlayerIds.filter(id => !byePlayerIdSet.has(id));
+    }
+    
+    // At this point, `playersForGames` is a list of IDs with a length divisible by 4.
+    // `byePlayerIds` contains the IDs of players who will not play this round.
+
+    // 3. Run the pairing logic ONLY on the pool of players who are playing.
     const { data: existingPartnerships, error: partnershipError } = await supabase.from('partnerships').select('player1_id, player2_id');
     if (partnershipError) throw partnershipError;
 
@@ -43,31 +71,16 @@ exports.handler = async function (event, context) {
       existingPartnerships.map(p => [p.player1_id, p.player2_id].sort((a, b) => a - b).join('-'))
     );
 
-    // --- CHANGE: Prioritize players with the most byes ---
-    // 1. Create objects with player IDs and their bye counts
-    let playersToPair = activePlayerIds.map(id => ({
-        id: id,
-        byeCount: byeCounts.get(id) || 0
-    }));
-
-    // 2. Sort players: those with MORE byes come FIRST. This means we try to pair them first.
-    playersToPair.sort((a, b) => b.byeCount - a.byeCount);
-    
-    // 3. Get just the sorted IDs to use in the pairing logic
-    const sortedPlayerIds = playersToPair.map(p => p.id);
-    // --- END CHANGE ---
-
     let bestPairs = [];
     const MAX_ATTEMPTS = 20;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      // Shuffle the sorted list slightly to get variation in partners, while keeping general priority
-      const playersForThisAttempt = shuffleArray([...sortedPlayerIds]);
+      const shuffledPlayers = shuffleArray([...playersForGames]);
       const currentPairs = [];
       const usedPlayerIds = new Set();
-      for (const playerA_id of playersForThisAttempt) {
+      for (const playerA_id of shuffledPlayers) {
         if (usedPlayerIds.has(playerA_id)) continue;
-        for (const playerB_id of playersForThisAttempt) {
+        for (const playerB_id of shuffledPlayers) {
           if (playerA_id === playerB_id || usedPlayerIds.has(playerB_id)) continue;
           const partnershipKey = [playerA_id, playerB_id].sort((a, b) => a - b).join('-');
           if (!partnershipSet.has(partnershipKey)) {
@@ -79,16 +92,18 @@ exports.handler = async function (event, context) {
         }
       }
       if (currentPairs.length > bestPairs.length) bestPairs = [...currentPairs];
-      if (bestPairs.length * 2 >= activePlayerIds.length - 1) break;
+      // If we've paired everyone in the game pool, we have a perfect solution.
+      if (bestPairs.length * 2 === playersForGames.length) break;
     }
+    // --- NEW ALGORITHM END ---
 
-    if (bestPairs.length < 2) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Failed to generate enough new pairs. Try adding more players or check existing partnerships.' }) };
+    if (playersForGames.length > 0 && bestPairs.length < playersForGames.length / 2) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Failed to generate enough new pairs for the players in games. All partner combinations may be used.' }) };
     }
     
     const matchesToInsert = [];
     for (let i = 0; i < bestPairs.length; i += 2) {
-      if (bestPairs[i+1]) {
+      if (bestPairs[i+1]) { // This check should always pass now, but it's safe to keep
          matchesToInsert.push({
             round_number: roundNumber,
             team1_player1_id: bestPairs[i].p1,
@@ -100,16 +115,11 @@ exports.handler = async function (event, context) {
       }
     }
     
-    if (matchesToInsert.length === 0) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Could not form any 2v2 matches from the generated pairs.' }) };
+    if (matchesToInsert.length > 0) {
+      await supabase.from('games').insert(matchesToInsert);
+      const newPartnershipsToInsert = bestPairs.map(p => ({ player1_id: p.p1, player2_id: p.p2 }));
+      await supabase.from('partnerships').insert(newPartnershipsToInsert);
     }
-    
-    await supabase.from('games').insert(matchesToInsert);
-    const newPartnershipsToInsert = bestPairs.map(p => ({ player1_id: p.p1, player2_id: p.p2 }));
-    await supabase.from('partnerships').insert(newPartnershipsToInsert);
-
-    const playersInGames = new Set(matchesToInsert.flatMap(m => [m.team1_player1_id, m.team1_player2_id, m.team2_player1_id, m.team2_player2_id]));
-    const byePlayerIds = activePlayerIds.filter(id => !playersInGames.has(id));
     
     let byePlayerNames = [];
     if (byePlayerIds.length > 0) {
