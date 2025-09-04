@@ -1,2 +1,6 @@
 # Local Netlify folder
 .netlify
+player_betas.csv
+
+# Local database backups - do not commit
+backup/
